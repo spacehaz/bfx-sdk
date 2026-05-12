@@ -32,12 +32,24 @@ describe("quote() matches viewOriginSwap() on-chain", () => {
   afterAll(() => pool.stop());
 
   const usdcAmounts = [
+    10n,                 // 0.00001 USDC
+    100n,                // 0.0001 USDC
+    1_000n,              // 0.001 USDC
     BigInt("100000"),    // 0.1 USDC
     500_000n,            // 0.5 USDC
     BigInt("1000000"),   //   1 USDC
     1_500_000n,          // 1.5 USDC
     BigInt("5000000"),   //   5 USDC
     10_000_000n,         //  10 USDC
+    11_000_000n,         //  11 USDC
+    12_000_000n,         //  12 USDC
+    13_000_000n,         //  13 USDC
+    14_000_000n,         //  14 USDC
+    15_000_000n,         //  15 USDC
+    16_000_000n,         //  16 USDC
+    17_000_000n,         //  17 USDC
+    18_000_000n,         //  18 USDC
+    19_000_000n,         //  19 USDC
     BigInt("20000000"),  //  20 USDC
     100_000_000n,        // 100 USDC
     1_000_000_000n,      // 1,000 USDC
