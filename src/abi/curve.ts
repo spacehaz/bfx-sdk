@@ -1,0 +1,65 @@
+export const CURVE_ABI = [
+  {
+    name: "viewCurve",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "alpha_", type: "uint256" },
+      { name: "beta_", type: "uint256" },
+      { name: "delta_", type: "uint256" },
+      { name: "epsilon_", type: "uint256" },
+      { name: "lambda_", type: "uint256" },
+    ],
+  },
+  {
+    name: "reserves",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "assimilator",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "_derivative", type: "address" }],
+    outputs: [{ name: "assimilator_", type: "address" }],
+  },
+  {
+    name: "Trade",
+    type: "event",
+    inputs: [
+      { name: "trader", type: "address", indexed: true },
+      { name: "origin", type: "address", indexed: true },
+      { name: "target", type: "address", indexed: true },
+      { name: "originAmount", type: "uint256", indexed: false },
+      { name: "targetAmount", type: "uint256", indexed: false },
+      { name: "rawProtocolFee", type: "int128", indexed: false },
+    ],
+  },
+  {
+    name: "viewOriginSwap",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "_origin", type: "address" },
+      { name: "_target", type: "address" },
+      { name: "_originAmount", type: "uint256" },
+    ],
+    outputs: [{ name: "tAmt_", type: "uint256" }],
+  },
+  {
+    name: "originSwap",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "_origin", type: "address" },
+      { name: "_target", type: "address" },
+      { name: "_originAmount", type: "uint256" },
+      { name: "_minTargetAmount", type: "uint256" },
+      { name: "_deadline", type: "uint256" },
+    ],
+    outputs: [{ name: "targetAmount_", type: "uint256" }],
+  },
+] as const;
