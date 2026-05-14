@@ -8,9 +8,10 @@ Every pool is `USDC ↔ FX_STABLECOIN` (e.g. EURC/USDC). The SDK covers a single
 
 ## What the SDK does
 
-1. Load pool state (reserves, curve params, oracle prices) from chain once, then keep it fresh via event subscriptions
-2. Quote off-chain: given `amountIn`, compute `amountOut` using ported curve math — no RPC call, runs in <1ms
-3. Build calldata for on-chain swap execution
+1. Discover pools via the Goldsky GraphQL subgraph (by token pair or address)
+2. Load pool state (reserves, curve params, oracle prices) from chain, then keep it fresh via event subscriptions
+3. Quote off-chain: given `amountIn`, compute `amountOut` using ported curve math — no RPC call, runs in <1ms
+4. Build calldata for on-chain swap execution
 
 ## Package structure
 
@@ -18,29 +19,33 @@ Every pool is `USDC ↔ FX_STABLECOIN` (e.g. EURC/USDC). The SDK covers a single
 src/
 ├── math/
 │   ├── abdk/
-│   │   ├── types.ts       # i128 type alias (bigint)
-│   │   ├── constants.ts   # MIN_64x64, MAX_64x64, ONE
-│   │   └── abdk.ts        # Port of ABDKMath64x64 (fromUInt, mul, div, etc.)
-│   ├── curveMath.ts       # calculateTrade + calculateFee — Shell Protocol bonding curve
-│   └── assimilator.ts     # token ↔ numeraire conversion via Chainlink oracle price
+│   │   ├── types.ts            # i128 type alias (bigint)
+│   │   ├── constants.ts        # MIN_64x64, MAX_64x64, ONE
+│   │   └── abdk.ts             # Port of ABDKMath64x64 (fromUInt, mul, div, etc.)
+│   ├── curveMath.ts            # calculateTrade + calculateFee — Shell Protocol bonding curve
+│   └── assimilator.ts          # token ↔ numeraire conversion via Chainlink oracle price
 │
 ├── pool/
-│   ├── BFX.ts             # Main class — create(), quote(), buildSwap(), stop()
-│   ├── fetchState.ts      # Reads pool state from chain (3 rounds of Promise.all)
-│   ├── interface.ts       # IBFX interface
-│   └── index.ts           # Re-exports
+│   ├── BFX.ts                  # Main class — constructor, loadPoolState(), quote(), buildSwap(), stop()
+│   ├── fetchState.ts           # Reads pool state from chain (3 rounds of Promise.all)
+│   ├── graphql.ts              # Shared GraphQL URL, gql helper, RawPair type, toPair mapper
+│   ├── fetchPoolByTokens.ts    # fetchPoolByTokens() + internal fetchPoolAddress()
+│   ├── fetchPoolByAddress.ts   # fetchPoolByAddress()
+│   ├── fetchAllPools.ts        # fetchAllPools()
+│   ├── interface.ts            # IBFX interface
+│   └── index.ts                # Re-exports
 │
 ├── abi/
-│   ├── curve.ts           # viewCurve, reserves, assimilator, Trade event, viewOriginSwap, originSwap
-│   ├── assimilator.ts     # getRate, oracleDecimals, oracle
-│   ├── erc20.ts           # decimals, balanceOf
-│   └── oracle.ts          # AnswerUpdated event
+│   ├── curve.ts                # viewCurve, reserves, assimilator, Trade event, viewOriginSwap, originSwap
+│   ├── assimilator.ts          # getRate, oracleDecimals, oracle
+│   ├── erc20.ts                # decimals, balanceOf
+│   └── oracle.ts               # AnswerUpdated event
 │
-├── constants.ts           # ONE, MAX_FEE, MIN_UTILITY_DIFF
-├── types.ts               # PoolState, CurveParams, QuoteResult, TransactionRequest
-├── quote.ts               # Pure quote function (used internally by BFX class)
-├── swap.ts                # buildSwap function (used internally by BFX class)
-└── index.ts               # Public exports
+├── constants.ts                # ONE, MAX_FEE, MIN_UTILITY_DIFF
+├── types.ts                    # PoolState, CurveParams, QuoteResult, TransactionRequest, PoolInfo
+├── quote.ts                    # Pure quote function (used internally by BFX class)
+├── swap.ts                     # buildSwap function (used internally by BFX class)
+└── index.ts                    # Public exports
 ```
 
 ## Public API
@@ -48,25 +53,40 @@ src/
 ```ts
 import { BFX } from "bfx-sdk";
 
-// Create a pool instance — fetches state from chain, subscribes to events
-const pool = await BFX.create(curveAddress: Address, rpcUrl: string): Promise<BFX>
+// Instantiate — no async, no pool address needed
+const bfx = new BFX(rpcUrl: string)
+
+// Pool discovery (GraphQL, no chain calls)
+bfx.getAllPoolsInfo(): Promise<PoolInfo[]>
+bfx.getPoolInfo(address: Address): Promise<PoolInfo | null>
+bfx.getPoolInfoByTokens(tokenA: Address, tokenB: Address): Promise<PoolInfo | null>
+
+// Load pool state — MUST be called before quote(), buildSwap(), getState()
+// Discovers pool via GraphQL, fetches chain state, subscribes to events
+bfx.loadPoolState(tokenA: Address, tokenB: Address): Promise<{ address: Address; state: PoolState }>
 
 // Off-chain quote — <1ms, no RPC call
-pool.quote(tokenIn: Address, tokenOut: Address, amountIn: bigint): QuoteResult
+bfx.quote(tokenIn: Address, tokenOut: Address, amountIn: bigint): QuoteResult
 
 // Build unsigned swap calldata
-pool.buildSwap(params: Omit<BuildSwapParams, "curveAddress">): TransactionRequest
+bfx.buildSwap(params: Omit<BuildSwapParams, "curveAddress">): TransactionRequest
 
 // Read current pool state snapshot
-pool.getState(): PoolState
+bfx.getState(): PoolState
 
 // Unsubscribe from chain events — call when done
-pool.stop(): void
+bfx.stop(): void
 ```
 
 ## Key types
 
 ```ts
+type PoolInfo = {
+  address: Address
+  token0: { address: Address; symbol: string }
+  token1: { address: Address; symbol: string }
+}
+
 type PoolState = {
   curveAddress: Address
   tokenA: Address          // always USDC
@@ -109,11 +129,13 @@ All math uses `bigint` — no floating point anywhere in the math path.
 
 ## Event subscriptions (pub/sub)
 
-`BFX.create()` subscribes to two event types via `watchContractEvent`:
+`loadPoolState()` subscribes to two event types via `watchContractEvent`:
 - `AnswerUpdated` on both Chainlink oracles → updates `tokenAOraclePrice` / `tokenBOraclePrice`
 - `Trade` on the Curve contract → re-fetches `reserveA` / `reserveB` via `balanceOf`
 
-Call `pool.stop()` to unsubscribe. Failing to call it leaks polling connections.
+Call `bfx.stop()` to unsubscribe. Failing to call it leaks polling connections.
+
+Note: `watchContractEvent` over HTTP requires a node that supports `eth_newFilter`. Public nodes that work: `https://mainnet.base.org`, `https://base.llamarpc.com`. `publicnode.com` does not support stateful filters.
 
 ## Tests
 
@@ -122,7 +144,14 @@ npm test               # run once
 npm test -- --reporter=verbose  # show per-test exchange rates and timings
 ```
 
-Tests in `tests/quote.test.ts` compare `pool.quote()` against live `viewOriginSwap()` calls on Base mainnet. Requires `BASE_RPC_URL` in `.env`.
+Tests in `tests/quote.test.ts` cover:
+- `quote()` before `loadPoolState()` throws
+- `getAllPoolsInfo()` returns a non-empty array
+- `getPoolInfo()` by address
+- `getPoolInfoByTokens()` by token pair
+- `quote()` bit-exact match against live `viewOriginSwap()` on Base mainnet
+
+Requires `BASE_RPC_URL` in `.env`.
 
 ## Tech stack
 

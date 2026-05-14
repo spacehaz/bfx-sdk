@@ -7,7 +7,7 @@ import { CURVE_ABI } from "../abi/curve";
 import { ERC20_ABI } from "../abi/erc20";
 import { ORACLE_ABI } from "../abi/oracle";
 import { fetchState, type ViemClient } from "./fetchState";
-import { fetchPoolAddress } from "./fetchPoolByTokens";
+import { fetchPoolAddress, fetchPoolByTokens } from "./fetchPoolByTokens";
 import { fetchPoolByAddress } from "./fetchPoolByAddress";
 import { fetchAllPools } from "./fetchAllPools";
 import type { PoolInfo } from "../types";
@@ -101,6 +101,10 @@ export class BFX implements IBFX {
     });
 
     this.unwatchers = [unwatchA, unwatchB, unwatchTrade];
+  }
+
+  getPoolInfoByTokens(tokenA: Address, tokenB: Address): Promise<PoolInfo | null> {
+    return fetchPoolByTokens(tokenA, tokenB);
   }
 
   getPoolInfo(address: Address): Promise<PoolInfo | null> {

@@ -45,6 +45,26 @@ describe("getAllPoolsInfo()", () => {
   }, 15_000);
 });
 
+describe("getPoolInfoByTokens()", () => {
+  it("returns pool info for USDC/EURC", async () => {
+    const bfx = new BFX(RPC_URL!);
+    const pool = await bfx.getPoolInfoByTokens(USDC, EURC);
+    expect(pool).not.toBeNull();
+    expect(pool!.address.toLowerCase()).toBe(POOL_ADDRESS.toLowerCase());
+    expect(pool!.token0.symbol).toBe("EURC");
+    expect(pool!.token1.symbol).toBe("USDC");
+  }, 15_000);
+
+  it("returns null for unknown token pair", async () => {
+    const bfx = new BFX(RPC_URL!);
+    const pool = await bfx.getPoolInfoByTokens(
+      "0x0000000000000000000000000000000000000001",
+      "0x0000000000000000000000000000000000000002",
+    );
+    expect(pool).toBeNull();
+  }, 15_000);
+});
+
 describe("getPoolInfo()", () => {
   it("returns pool info by address", async () => {
     const bfx = new BFX(RPC_URL!);

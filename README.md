@@ -30,6 +30,9 @@ const pools = await bfx.getAllPoolsInfo();
 
 // single pool by address
 const pool = await bfx.getPoolInfo("0x671366075cc7b3b611de9ecf856e44587a11f303");
+
+// single pool by token pair
+const pool = await bfx.getPoolInfoByTokens(USDC, EURC);
 ```
 
 ### Load pool state
