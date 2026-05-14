@@ -1,7 +1,7 @@
 import type { Address, PoolInfo } from "../types";
 
 export const GRAPHQL_URL =
-  "https://api.goldsky.com/api/public/project_cm8g2ca7b0ewq01uea1xl12vp/subgraphs/amm-v3-base/1.0.0/gn";
+  "https://api.goldsky.com/api/public/project_cm8g2ca7b0ewq01uea1xl12vp/subgraphs/amm-v3-base/2.0.0/gn";
 
 export const PAIR_FIELDS = `{ id token0 { id symbol } token1 { id symbol } }`;
 
