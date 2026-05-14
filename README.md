@@ -2,14 +2,6 @@
 
 Off-chain quoting and swap building for BFX liquidity pools. Designed for DEX aggregators — compute quotes locally in microseconds without an RPC call, then build the swap transaction when ready.
 
-> **Note:** Currently only supports the USDC ↔ EURC pool on Base. Additional pools will be added as liquidity grows.
-
-## Supported pools
-
-| Pool        | Network |
-| ----------- | ------- |
-| USDC ↔ EURC | Base    |
-
 ## Installation
 
 ```bash
@@ -18,21 +10,46 @@ npm install bfx-sdk
 
 ## Usage
 
-### Quote
+### Initialisation
 
 ```ts
 import { BFX } from "bfx-sdk";
 
-const pool = await BFX.create(
-  "0x671366075cc7b3b611de9ecf856e44587a11f303", // pool address
-  "https://your-rpc-url.com",
-);
+const bfx = new BFX("https://your-rpc-url.com");
+```
 
-// amounts are in raw token units (6 decimals for USDC/EURC)
+### Discover pools
+
+```ts
+// all available pools
+const pools = await bfx.getAllPoolsInfo();
+// [
+//   { address: "0x671366...", token0: { address: "0x60a3...", symbol: "EURC" }, token1: { address: "0x8335...", symbol: "USDC" } },
+//   { address: "0xf0c350...", token0: { address: "0x0a4c...", symbol: "XSGD" }, token1: { address: "0x8335...", symbol: "USDC" } },
+// ]
+
+// single pool by address
+const pool = await bfx.getPoolInfo("0x671366075cc7b3b611de9ecf856e44587a11f303");
+```
+
+### Load pool state
+
+**Must be called before `quote()`, `buildSwap()`, or `getState()`.**
+
+Discovers the pool address by token pair, fetches on-chain reserves and curve parameters, and subscribes to events to keep state fresh as trades and oracle price updates occur.
+
+```ts
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const EURC = "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42";
 
-const result = pool.quote(USDC, EURC, 1_000_000n); // 1 USDC
+const { address, state } = await bfx.loadPoolState(USDC, EURC);
+```
+
+### Quote
+
+```ts
+// amounts are in raw token units (6 decimals for USDC/EURC)
+const result = bfx.quote(USDC, EURC, 1_000_000n); // 1 USDC → EURC
 
 console.log(result.amountOut); // how many EURC you receive (bigint)
 console.log(result.fee); // fee taken (bigint)
@@ -43,7 +60,7 @@ console.log(result.effectivePrice); // output per 1 input, scaled by 1e18
 ### Build a swap transaction
 
 ```ts
-const tx = pool.buildSwap({
+const tx = bfx.buildSwap({
   tokenIn: USDC,
   tokenOut: EURC,
   amountIn: 1_000_000n,
@@ -52,11 +69,9 @@ const tx = pool.buildSwap({
   deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 20), // 20 min
 });
 
-// tx.to   — contract address to call (the Curve pool)
-// tx.data — encoded originSwap(...) call with all parameters packed into bytes
+// tx.to    — contract address
+// tx.data  — encoded originSwap() calldata
 // tx.value — ETH to send alongside (0 for token swaps)
-
-// pass directly to your wallet:
 
 // wagmi
 await sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
@@ -67,10 +82,10 @@ await signer.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
 
 ### Cleanup
 
-The pool subscribes to on-chain events to keep its state fresh. Call `stop()` when done:
+Call `stop()` to unsubscribe from events when the pool is no longer needed:
 
 ```ts
-pool.stop();
+bfx.stop();
 ```
 
 ## Amount format

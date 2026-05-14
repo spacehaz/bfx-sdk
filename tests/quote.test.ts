@@ -22,11 +22,53 @@ async function viewOriginSwap(tokenIn: `0x${string}`, tokenOut: `0x${string}`, a
   });
 }
 
+describe("quote() before loadPoolState()", () => {
+  it("throws if pool state is not loaded", () => {
+    const bfx = new BFX(RPC_URL!);
+    expect(() => bfx.quote(USDC, EURC, 1_000_000n)).toThrow("Pool not loaded. Call loadPoolState() first.");
+  });
+});
+
+describe("getAllPoolsInfo()", () => {
+  it("returns an array of pool info", async () => {
+    const bfx = new BFX(RPC_URL!);
+    const pools = await bfx.getAllPoolsInfo();
+    expect(Array.isArray(pools)).toBe(true);
+    expect(pools.length).toBeGreaterThan(0);
+    for (const pool of pools) {
+      expect(pool.address).toMatch(/^0x/);
+      expect(pool.token0.address).toMatch(/^0x/);
+      expect(pool.token0.symbol).toBeTruthy();
+      expect(pool.token1.address).toMatch(/^0x/);
+      expect(pool.token1.symbol).toBeTruthy();
+    }
+  }, 15_000);
+});
+
+describe("getPoolInfo()", () => {
+  it("returns pool info by address", async () => {
+    const bfx = new BFX(RPC_URL!);
+    const pool = await bfx.getPoolInfo(POOL_ADDRESS);
+    expect(pool).not.toBeNull();
+    expect(pool!.address.toLowerCase()).toBe(POOL_ADDRESS.toLowerCase());
+    expect(pool!.token0.symbol).toBe("EURC");
+    expect(pool!.token1.symbol).toBe("USDC");
+  }, 15_000);
+
+  it("returns null for unknown address", async () => {
+    const bfx = new BFX(RPC_URL!);
+    const pool = await bfx.getPoolInfo("0x0000000000000000000000000000000000000000");
+    expect(pool).toBeNull();
+  }, 15_000);
+});
+
 describe("quote() matches viewOriginSwap() on-chain", () => {
   let pool: BFX;
 
   beforeAll(async () => {
-    pool = await BFX.create(POOL_ADDRESS, RPC_URL);
+    pool = new BFX(RPC_URL);
+    const poolState = await pool.loadPoolState(USDC, EURC);
+    console.log({ poolState })
   }, 30_000);
 
   afterAll(() => pool.stop());

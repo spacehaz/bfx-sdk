@@ -38,3 +38,9 @@ export type TransactionRequest = {
   data: `0x${string}`;
   value: bigint;
 };
+
+export type PoolInfo = {
+  address: Address;
+  token0: { address: Address; symbol: string };
+  token1: { address: Address; symbol: string };
+};
