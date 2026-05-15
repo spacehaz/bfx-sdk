@@ -8,4 +8,11 @@ export const ORACLE_ABI = [
       { name: "updatedAt", type: "uint256", indexed: false },
     ],
   },
+  {
+    name: "aggregator",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
 ] as const;

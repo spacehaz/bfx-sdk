@@ -4,6 +4,7 @@ import type { PoolState, Address, CurveParams } from "../types";
 import { CURVE_ABI } from "../abi/curve";
 import { ASSIMILATOR_ABI } from "../abi/assimilator";
 import { ERC20_ABI } from "../abi/erc20";
+import { ORACLE_ABI } from "../abi/oracle";
 
 export type ViemClient = Pick<
   ReturnType<typeof createPublicClient>,
@@ -41,8 +42,8 @@ export async function fetchState(
       client.readContract({ address: tokenB, abi: ERC20_ABI, functionName: "balanceOf", args: [curveAddress] }),
     ]);
 
-  // Round 3: oracle rates + oracle addresses
-  const [tokenAOraclePrice, tokenBOraclePrice, oracleDecimals, oracleA, oracleB] =
+  // Round 3: oracle rates + oracle proxy addresses
+  const [tokenAOraclePrice, tokenBOraclePrice, oracleDecimals, oracleProxyA, oracleProxyB] =
     await Promise.all([
       client.readContract({ address: assimilatorA, abi: ASSIMILATOR_ABI, functionName: "getRate" }),
       client.readContract({ address: assimilatorB, abi: ASSIMILATOR_ABI, functionName: "getRate" }),
@@ -50,6 +51,12 @@ export async function fetchState(
       client.readContract({ address: assimilatorA, abi: ASSIMILATOR_ABI, functionName: "oracle" }),
       client.readContract({ address: assimilatorB, abi: ASSIMILATOR_ABI, functionName: "oracle" }),
     ]);
+
+  // Round 4: resolve underlying aggregators — AnswerUpdated is emitted on the aggregator, not the proxy
+  const [oracleA, oracleB] = await Promise.all([
+    client.readContract({ address: oracleProxyA, abi: ORACLE_ABI, functionName: "aggregator" }),
+    client.readContract({ address: oracleProxyB, abi: ORACLE_ABI, functionName: "aggregator" }),
+  ]);
 
   const params: CurveParams = {
     alpha: fromScaled(viewCurveResult[0]),
