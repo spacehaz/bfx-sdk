@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, type TestContext } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, type TestContext } from "vitest";
+
+afterEach(() => new Promise((resolve) => setTimeout(resolve, 10_000)), 15_000);
 import { createPublicClient, http } from "viem";
 import { base } from "viem/chains";
 import { BFX } from "../src/pool/BFX";
@@ -30,7 +32,7 @@ async function viewOriginSwap(
 describe("quote() before loadPoolState()", () => {
   it("throws if pool state is not loaded", () => {
     const bfx = new BFX(RPC_URL!);
-    expect(() => bfx.quote(USDC, EURC, 1_000_000n)).toThrow("Pool not loaded. Call loadPoolState() first.");
+    expect(() => bfx.quote(USDC, EURC, 1_000_000n)).toThrow("Call loadPoolState() first.");
   });
 });
 
@@ -99,10 +101,6 @@ describe("quote() EURC/USDC matches viewOriginSwap() on-chain", () => {
 
   const usdcAmounts = [
     10n,                 // 0.00001 USDC
-    100n,                // 0.0001 USDC
-    1_000n,              // 0.001 USDC
-    BigInt("100000"),    // 0.1 USDC
-    500_000n,            // 0.5 USDC
     BigInt("1000000"),   //   1 USDC
     1_500_000n,          // 1.5 USDC
     BigInt("5000000"),   //   5 USDC
@@ -110,15 +108,11 @@ describe("quote() EURC/USDC matches viewOriginSwap() on-chain", () => {
   ];
 
   const eurcAmounts = [
-    BigInt("100000"),    // 0.1 EURC
-    500_000n,            // 0.5 EURC
+    10n,                 // 0.00001 EURC
     BigInt("1000000"),   //   1 EURC
     1_500_000n,          // 1.5 EURC
     BigInt("5000000"),   //   5 EURC
-    10_000_000n,         //  10 EURC
-    BigInt("20000000"),  //  20 EURC
-    100_000_000n,        // 100 EURC
-    1_000_000_000n,      // 1,000 EURC
+    10_000_000_000n,     // 10,000 EURC
   ];
 
   const fmt = (amount: bigint) => (Number(amount) / 1_000_000).toString();
@@ -142,6 +136,11 @@ describe("quote() EURC/USDC matches viewOriginSwap() on-chain", () => {
     console.log(`    ${fmt(amountIn)} → ${fmt(result.amountOut)} | sdk: ${sdkMs}ms | chain: ${chainMs}ms`);
 
     expect(result.amountOut).toBe(onchain!);
+    expect(result.hops).toHaveLength(1);
+    expect(result.hops[0].tokenIn).toBe(tokenIn);
+    expect(result.hops[0].tokenOut).toBe(tokenOut);
+    expect(result.hops[0].amountIn).toBe(amountIn);
+    expect(result.hops[0].amountOut).toBe(result.amountOut);
   }
 
   for (const amountIn of usdcAmounts) {

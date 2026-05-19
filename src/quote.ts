@@ -53,5 +53,11 @@ export function quote(pool: PoolState, tokenIn: Address, tokenOut: Address, amou
 
   const priceImpactBps = Number((oracleOut - amountOut) * 10_000n / oracleOut);
 
-  return { amountOut, priceImpactBps, effectivePrice, fee };
+  return {
+    amountOut,
+    priceImpactBps,
+    effectivePrice,
+    fee,
+    hops: [{ tokenIn, tokenOut, amountIn, amountOut, fee }],
+  };
 }

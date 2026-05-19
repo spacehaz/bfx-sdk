@@ -26,11 +26,20 @@ export type PoolState = {
   blockNumber: bigint;
 };
 
+export type QuoteHop = {
+  tokenIn: Address;
+  tokenOut: Address;
+  amountIn: bigint;
+  amountOut: bigint;
+  fee: bigint;
+};
+
 export type QuoteResult = {
   amountOut: bigint;
   priceImpactBps: number;
   effectivePrice: bigint;
   fee: bigint;
+  hops: QuoteHop[]; // one entry for single-hop, two for multi-hop
 };
 
 export type TransactionRequest = {

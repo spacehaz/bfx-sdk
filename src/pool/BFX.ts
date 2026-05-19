@@ -1,13 +1,14 @@
 import { createPublicClient, http } from "viem";
 import { base } from "viem/chains";
 import { quote as _quote } from "../quote";
-import { buildSwap as _buildSwap, type BuildSwapParams } from "../swap";
+import { buildSingleHopSwap, buildMultiHopSwap, type BuildSwapParams } from "../swap";
 import type { PoolState, Address, QuoteResult, TransactionRequest } from "../types";
 import { CURVE_ABI } from "../abi/curve";
 import { ERC20_ABI } from "../abi/erc20";
 import { ORACLE_ABI } from "../abi/oracle";
 import { fetchState, type ViemClient } from "./fetchState";
 import { fetchPoolAddress, fetchPoolByTokens } from "./fetchPoolByTokens";
+import { ROUTER_ADDRESS, USDC_ADDRESS } from "../constants";
 import { fetchPoolByAddress } from "./fetchPoolByAddress";
 import { fetchAllPools } from "./fetchAllPools";
 import type { PoolInfo } from "../types";
@@ -15,43 +16,83 @@ import type { IBFX } from "./interface";
 
 type OracleLog = { args: { current?: bigint; roundId?: bigint; updatedAt?: bigint } };
 
+type LoadedPool = {
+  state: PoolState;
+  unwatchers: (() => void)[];
+};
+
 export class BFX implements IBFX {
-  private state: PoolState | null = null;
+  private pools: Map<string, LoadedPool> = new Map();
   private client: ViemClient;
-  private unwatchers: (() => void)[] = [];
+
+  private poolKey(a: Address, b: Address): string {
+    return a.toLowerCase() < b.toLowerCase()
+      ? `${a.toLowerCase()}-${b.toLowerCase()}`
+      : `${b.toLowerCase()}-${a.toLowerCase()}`;
+  }
+
+  private findPool(tokenA: Address, tokenB: Address): PoolState | null {
+    return this.pools.get(this.poolKey(tokenA, tokenB))?.state ?? null;
+  }
 
   constructor(rpcUrl: string) {
     this.client = createPublicClient({ chain: base, transport: http(rpcUrl) });
   }
 
-  async loadPoolState(tokenA: Address, tokenB: Address): Promise<{ address: Address; state: PoolState }> {
-    const curveAddress = await fetchPoolAddress(tokenA, tokenB);
+  private async loadSingleCurve(curveAddress: Address): Promise<PoolState> {
     const { state, oracleA, oracleB } = await fetchState(this.client, curveAddress);
+    const key = this.poolKey(state.tokenA, state.tokenB);
 
-    this.stop();
-    this.state = state;
-    this.subscribe(oracleA, oracleB);
+    // Stop existing subscriptions if this pool is being reloaded
+    this.pools.get(key)?.unwatchers.forEach((u) => u());
 
-    return { address: curveAddress, state: { ...state } };
+    const unwatchers = this.buildSubscription(key, state, oracleA, oracleB);
+    this.pools.set(key, { state, unwatchers });
+    return state;
   }
 
-  private requireState(): PoolState {
-    if (!this.state) throw new Error("Pool not loaded. Call loadPoolState() first.");
-    return this.state;
+  async loadPoolState(tokenA: Address, tokenB: Address): Promise<{ address: Address; state: PoolState }[]> {
+    const isDirectPool =
+      tokenA.toLowerCase() === USDC_ADDRESS.toLowerCase() ||
+      tokenB.toLowerCase() === USDC_ADDRESS.toLowerCase();
+
+    if (isDirectPool) {
+      const address = await fetchPoolAddress(tokenA, tokenB);
+      const state = await this.loadSingleCurve(address);
+      return [{ address, state: { ...state } }];
+    }
+
+    // Multi-hop: load both USDC bridge pools in parallel
+    const [addressA, addressB] = await Promise.all([
+      fetchPoolAddress(tokenA, USDC_ADDRESS),
+      fetchPoolAddress(tokenB, USDC_ADDRESS),
+    ]);
+
+    const [stateA, stateB] = await Promise.all([
+      this.loadSingleCurve(addressA),
+      this.loadSingleCurve(addressB),
+    ]);
+
+    return [
+      { address: addressA, state: { ...stateA } },
+      { address: addressB, state: { ...stateB } },
+    ];
   }
 
-  private subscribe(oracleA: Address, oracleB: Address): void {
+  private buildSubscription(key: string, state: PoolState, oracleA: Address, oracleB: Address): (() => void)[] {
     const unwatchA = this.client.watchContractEvent({
       address: oracleA,
       abi: ORACLE_ABI,
       eventName: "AnswerUpdated",
       onLogs: (logs: OracleLog[]) => {
         console.log("[BFX] AnswerUpdated (tokenA oracle)", logs);
+        const entry = this.pools.get(key);
+        if (!entry) return;
         const latest = logs[logs.length - 1];
         if (latest.args.current !== undefined) {
-          const prev = this.state!.tokenAOraclePrice;
-          this.state = { ...this.state!, tokenAOraclePrice: BigInt(latest.args.current) };
-          console.log("[BFX] tokenAOraclePrice updated", { prev, next: this.state.tokenAOraclePrice });
+          const prev = entry.state.tokenAOraclePrice;
+          entry.state = { ...entry.state, tokenAOraclePrice: BigInt(latest.args.current) };
+          console.log("[BFX] tokenAOraclePrice updated", { prev, next: entry.state.tokenAOraclePrice });
         }
       },
       onError: (err) => console.error("[BFX] tokenA oracle watch error", err),
@@ -63,44 +104,38 @@ export class BFX implements IBFX {
       eventName: "AnswerUpdated",
       onLogs: (logs: OracleLog[]) => {
         console.log("[BFX] AnswerUpdated (tokenB oracle)", logs);
+        const entry = this.pools.get(key);
+        if (!entry) return;
         const latest = logs[logs.length - 1];
         if (latest.args.current !== undefined) {
-          const prev = this.state!.tokenBOraclePrice;
-          this.state = { ...this.state!, tokenBOraclePrice: BigInt(latest.args.current) };
-          console.log("[BFX] tokenBOraclePrice updated", { prev, next: this.state.tokenBOraclePrice });
+          const prev = entry.state.tokenBOraclePrice;
+          entry.state = { ...entry.state, tokenBOraclePrice: BigInt(latest.args.current) };
+          console.log("[BFX] tokenBOraclePrice updated", { prev, next: entry.state.tokenBOraclePrice });
         }
       },
       onError: (err) => console.error("[BFX] tokenB oracle watch error", err),
     });
 
     const unwatchTrade = this.client.watchContractEvent({
-      address: this.state!.curveAddress,
+      address: state.curveAddress,
       abi: CURVE_ABI,
       eventName: "Trade",
-      onLogs: async (logs) => {
-        console.log("[BFX] Trade event", logs);
+      onLogs: async () => {
+        console.log("[BFX] Trade event on", state.curveAddress);
+        const entry = this.pools.get(key);
+        if (!entry) return;
         const [reserveA, reserveB] = await Promise.all([
-          this.client.readContract({
-            address: this.state!.tokenA,
-            abi: ERC20_ABI,
-            functionName: "balanceOf",
-            args: [this.state!.curveAddress],
-          }),
-          this.client.readContract({
-            address: this.state!.tokenB,
-            abi: ERC20_ABI,
-            functionName: "balanceOf",
-            args: [this.state!.curveAddress],
-          }),
+          this.client.readContract({ address: entry.state.tokenA, abi: ERC20_ABI, functionName: "balanceOf", args: [entry.state.curveAddress] }),
+          this.client.readContract({ address: entry.state.tokenB, abi: ERC20_ABI, functionName: "balanceOf", args: [entry.state.curveAddress] }),
         ]);
-        const prev = { reserveA: this.state!.reserveA, reserveB: this.state!.reserveB };
-        this.state = { ...this.state!, reserveA, reserveB };
+        const prev = { reserveA: entry.state.reserveA, reserveB: entry.state.reserveB };
+        entry.state = { ...entry.state, reserveA, reserveB };
         console.log("[BFX] reserves updated", { prev, next: { reserveA, reserveB } });
       },
       onError: (err) => console.error("[BFX] Trade watch error", err),
     });
 
-    this.unwatchers = [unwatchA, unwatchB, unwatchTrade];
+    return [unwatchA, unwatchB, unwatchTrade];
   }
 
   getPoolInfoByTokens(tokenA: Address, tokenB: Address): Promise<PoolInfo | null> {
@@ -116,20 +151,54 @@ export class BFX implements IBFX {
   }
 
   quote(tokenIn: Address, tokenOut: Address, amountIn: bigint): QuoteResult {
-    return _quote(this.requireState(), tokenIn, tokenOut, amountIn);
+    // Single-hop
+    const direct = this.findPool(tokenIn, tokenOut);
+    if (direct) return _quote(direct, tokenIn, tokenOut, amountIn);
+
+    // Multi-hop via USDC
+    const pool1 = this.findPool(tokenIn, USDC_ADDRESS);
+    const pool2 = this.findPool(USDC_ADDRESS, tokenOut);
+
+    if (!pool1 || !pool2) throw new Error(`No route from ${tokenIn} to ${tokenOut}. Call loadPoolState() first.`);
+
+    const hop1 = _quote(pool1, tokenIn, USDC_ADDRESS, amountIn);
+    const hop2 = _quote(pool2, USDC_ADDRESS, tokenOut, hop1.amountOut);
+
+    return {
+      amountOut: hop2.amountOut,
+      priceImpactBps: hop1.priceImpactBps + hop2.priceImpactBps,
+      effectivePrice: (hop2.amountOut * 10n ** 18n) / amountIn,
+      fee: hop2.fee,
+      hops: [
+        { tokenIn, tokenOut: USDC_ADDRESS, amountIn, amountOut: hop1.amountOut, fee: hop1.fee },
+        { tokenIn: USDC_ADDRESS, tokenOut, amountIn: hop1.amountOut, amountOut: hop2.amountOut, fee: hop2.fee },
+      ],
+    };
   }
 
-  buildSwap(params: Omit<BuildSwapParams, "curveAddress">): TransactionRequest {
-    const { curveAddress } = this.requireState();
-    return _buildSwap({ ...params, curveAddress });
+  buildSwap(params: BuildSwapParams): TransactionRequest {
+    const { tokenIn, tokenOut } = params;
+
+    // Single-hop — call the curve directly
+    const direct = this.findPool(tokenIn, tokenOut);
+    if (direct) return buildSingleHopSwap({ ...params, curveAddress: direct.curveAddress });
+
+    // Multi-hop — call the Router
+    const pool1 = this.findPool(tokenIn, USDC_ADDRESS);
+    const pool2 = this.findPool(USDC_ADDRESS, tokenOut);
+    if (!pool1 || !pool2) throw new Error(`No route from ${tokenIn} to ${tokenOut}. Call loadPoolState() first.`);
+
+    return buildMultiHopSwap({ ...params, routerAddress: ROUTER_ADDRESS });
   }
 
-  getState(): PoolState {
-    return { ...this.requireState() };
+  getPoolState(tokenA: Address, tokenB: Address): PoolState {
+    const pool = this.findPool(tokenA, tokenB);
+    if (!pool) throw new Error(`Pool for ${tokenA}/${tokenB} not loaded. Call loadPoolState() first.`);
+    return { ...pool };
   }
 
   stop(): void {
-    this.unwatchers.forEach((u) => u());
-    this.unwatchers = [];
+    this.pools.forEach(({ unwatchers }) => unwatchers.forEach((u) => u()));
+    this.pools.clear();
   }
 }

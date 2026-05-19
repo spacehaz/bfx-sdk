@@ -1,9 +1,9 @@
 import { encodeFunctionData } from "viem";
 import { CURVE_ABI } from "./abi/curve";
+import { ROUTER_ABI } from "./abi/router";
 import type { Address, TransactionRequest } from "./types";
 
 export type BuildSwapParams = {
-  curveAddress: Address;
   tokenIn: Address;
   tokenOut: Address;
   amountIn: bigint;
@@ -12,9 +12,8 @@ export type BuildSwapParams = {
   deadline: number;
 };
 
-// Encodes calldata for originSwap on the Curve contract.
-// The caller is responsible for approving tokenIn before submitting.
-export function buildSwap(params: BuildSwapParams): TransactionRequest {
+// Encodes calldata for a single-hop swap directly on the Curve contract.
+export function buildSingleHopSwap(params: BuildSwapParams & { curveAddress: Address }): TransactionRequest {
   const data = encodeFunctionData({
     abi: CURVE_ABI,
     functionName: "originSwap",
@@ -27,9 +26,22 @@ export function buildSwap(params: BuildSwapParams): TransactionRequest {
     ],
   });
 
-  return {
-    to: params.curveAddress,
-    data,
-    value: 0n,
-  };
+  return { to: params.curveAddress, data, value: 0n };
+}
+
+// Encodes calldata for a multi-hop swap through the Router contract.
+export function buildMultiHopSwap(params: BuildSwapParams & { routerAddress: Address }): TransactionRequest {
+  const data = encodeFunctionData({
+    abi: ROUTER_ABI,
+    functionName: "originSwap",
+    args: [
+      params.tokenIn,
+      params.tokenOut,
+      params.amountIn,
+      params.minAmountOut,
+      BigInt(params.deadline),
+    ],
+  });
+
+  return { to: params.routerAddress, data, value: 0n };
 }
