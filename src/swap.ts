@@ -30,15 +30,14 @@ export function buildSingleHopSwap(params: BuildSwapParams & { curveAddress: Add
 }
 
 // Encodes calldata for a multi-hop swap through the Router contract.
-export function buildMultiHopSwap(params: BuildSwapParams & { routerAddress: Address }): TransactionRequest {
+export function buildMultiHopSwap(params: BuildSwapParams & { routerAddress: Address; path: Address[] }): TransactionRequest {
   const data = encodeFunctionData({
     abi: ROUTER_ABI,
     functionName: "originSwap",
     args: [
-      params.tokenIn,
-      params.tokenOut,
       params.amountIn,
       params.minAmountOut,
+      params.path,
       BigInt(params.deadline),
     ],
   });

@@ -188,7 +188,7 @@ export class BFX implements IBFX {
     const pool2 = this.findPool(USDC_ADDRESS, tokenOut);
     if (!pool1 || !pool2) throw new Error(`No route from ${tokenIn} to ${tokenOut}. Call loadPoolState() first.`);
 
-    return buildMultiHopSwap({ ...params, routerAddress: ROUTER_ADDRESS });
+    return buildMultiHopSwap({ ...params, routerAddress: ROUTER_ADDRESS, path: [tokenIn, USDC_ADDRESS, tokenOut] });
   }
 
   getPoolState(tokenA: Address, tokenB: Address): PoolState {
