@@ -1,6 +1,6 @@
 {
   "name": "bfx-sdk",
-  "version": "0.0.1-beta-rc.8",
+  "version": "0.0.1-beta-rc.9",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",

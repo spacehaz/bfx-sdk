@@ -6,9 +6,12 @@ import { ONE } from "./constants";
 import type { PoolState, QuoteResult, Address } from "./types";
 
 export function quote(pool: PoolState, tokenIn: Address, tokenOut: Address, amountIn: bigint): QuoteResult {
-  if (tokenIn === tokenOut) throw new Error("tokenIn and tokenOut must be different");
-  const inputIndex  = tokenIn === pool.tokenA ? 0 : 1;
-  const outputIndex = tokenOut === pool.tokenA ? 0 : 1;
+  const tIn  = tokenIn.toLowerCase() as Address;
+  const tOut = tokenOut.toLowerCase() as Address;
+
+  if (tIn === tOut) throw new Error("tokenIn and tokenOut must be different");
+  const inputIndex  = tIn === pool.tokenA.toLowerCase() ? 0 : 1;
+  const outputIndex = tOut === pool.tokenA.toLowerCase() ? 0 : 1;
 
   const inputRate  = inputIndex === 0 ? pool.tokenAOraclePrice : pool.tokenBOraclePrice;
   const outputRate = inputIndex === 0 ? pool.tokenBOraclePrice : pool.tokenAOraclePrice;
@@ -58,6 +61,6 @@ export function quote(pool: PoolState, tokenIn: Address, tokenOut: Address, amou
     priceImpactBps,
     effectivePrice,
     fee,
-    hops: [{ tokenIn, tokenOut, amountIn, amountOut, fee }],
+    hops: [{ tokenIn: tIn, tokenOut: tOut, amountIn, amountOut, fee }],
   };
 }

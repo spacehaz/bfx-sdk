@@ -151,18 +151,21 @@ export class BFX implements IBFX {
   }
 
   quote(tokenIn: Address, tokenOut: Address, amountIn: bigint): QuoteResult {
+    const tIn  = tokenIn.toLowerCase() as Address;
+    const tOut = tokenOut.toLowerCase() as Address;
+
     // Single-hop
-    const direct = this.findPool(tokenIn, tokenOut);
-    if (direct) return _quote(direct, tokenIn, tokenOut, amountIn);
+    const direct = this.findPool(tIn, tOut);
+    if (direct) return _quote(direct, tIn, tOut, amountIn);
 
     // Multi-hop via USDC
-    const pool1 = this.findPool(tokenIn, USDC_ADDRESS);
-    const pool2 = this.findPool(USDC_ADDRESS, tokenOut);
+    const pool1 = this.findPool(tIn, USDC_ADDRESS);
+    const pool2 = this.findPool(USDC_ADDRESS, tOut);
 
-    if (!pool1 || !pool2) throw new Error(`No route from ${tokenIn} to ${tokenOut}. Call loadPoolState() first.`);
+    if (!pool1 || !pool2) throw new Error(`No route from ${tIn} to ${tOut}. Call loadPoolState() first.`);
 
-    const hop1 = _quote(pool1, tokenIn, USDC_ADDRESS, amountIn);
-    const hop2 = _quote(pool2, USDC_ADDRESS, tokenOut, hop1.amountOut);
+    const hop1 = _quote(pool1, tIn, USDC_ADDRESS, amountIn);
+    const hop2 = _quote(pool2, USDC_ADDRESS, tOut, hop1.amountOut);
 
     return {
       amountOut: hop2.amountOut,
@@ -170,25 +173,27 @@ export class BFX implements IBFX {
       effectivePrice: (hop2.amountOut * 10n ** 18n) / amountIn,
       fee: hop2.fee,
       hops: [
-        { tokenIn, tokenOut: USDC_ADDRESS, amountIn, amountOut: hop1.amountOut, fee: hop1.fee },
-        { tokenIn: USDC_ADDRESS, tokenOut, amountIn: hop1.amountOut, amountOut: hop2.amountOut, fee: hop2.fee },
+        { tokenIn: tIn, tokenOut: USDC_ADDRESS, amountIn, amountOut: hop1.amountOut, fee: hop1.fee },
+        { tokenIn: USDC_ADDRESS, tokenOut: tOut, amountIn: hop1.amountOut, amountOut: hop2.amountOut, fee: hop2.fee },
       ],
     };
   }
 
   buildSwap(params: BuildSwapParams): TransactionRequest {
-    const { tokenIn, tokenOut } = params;
+    const tIn  = params.tokenIn.toLowerCase() as Address;
+    const tOut = params.tokenOut.toLowerCase() as Address;
+    const normalized = { ...params, tokenIn: tIn, tokenOut: tOut };
 
     // Single-hop — call the curve directly
-    const direct = this.findPool(tokenIn, tokenOut);
-    if (direct) return buildSingleHopSwap({ ...params, curveAddress: direct.curveAddress });
+    const direct = this.findPool(tIn, tOut);
+    if (direct) return buildSingleHopSwap({ ...normalized, curveAddress: direct.curveAddress });
 
     // Multi-hop — call the Router
-    const pool1 = this.findPool(tokenIn, USDC_ADDRESS);
-    const pool2 = this.findPool(USDC_ADDRESS, tokenOut);
-    if (!pool1 || !pool2) throw new Error(`No route from ${tokenIn} to ${tokenOut}. Call loadPoolState() first.`);
+    const pool1 = this.findPool(tIn, USDC_ADDRESS);
+    const pool2 = this.findPool(USDC_ADDRESS, tOut);
+    if (!pool1 || !pool2) throw new Error(`No route from ${tIn} to ${tOut}. Call loadPoolState() first.`);
 
-    return buildMultiHopSwap({ ...params, routerAddress: ROUTER_ADDRESS, path: [tokenIn, USDC_ADDRESS, tokenOut] });
+    return buildMultiHopSwap({ ...normalized, routerAddress: ROUTER_ADDRESS, path: [tIn, USDC_ADDRESS, tOut] });
   }
 
   getPoolState(tokenA: Address, tokenB: Address): PoolState {
