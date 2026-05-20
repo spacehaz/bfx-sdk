@@ -10,8 +10,10 @@ const RPC_URL = process.env.BASE_RPC_URL;
 if (!RPC_URL) throw new Error("BASE_RPC_URL env variable is not set");
 
 const EURC_USDC_POOL = "0x80ba6376c0Ea9A14C1d4411C3639e87d441A6b72" as const;
+const XSGD_USDC_POOL = "0xbBb18Abd9aC5D0470B49494D074b2C9f161ccf09" as const;
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 const EURC = "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42" as const;
+const XSGD = "0x0a4c9CB2778ab3302996a34BEFcf9a8bc288C33b" as const;
 
 const client = createPublicClient({ chain: base, transport: http(RPC_URL) });
 
@@ -150,5 +152,53 @@ describe("quote() EURC/USDC matches viewOriginSwap() on-chain", () => {
   for (const amountIn of eurcAmounts) {
     it(`EURC → USDC: ${fmt(amountIn)} EURC`, (ctx) => assertQuote(ctx, EURC_USDC_POOL, EURC, USDC, amountIn));
   }
+});
+
+describe("loadPoolState() multi-hop — EURC/XSGD", () => {
+  let bfx: BFX;
+
+  beforeAll(async () => {
+    bfx = new BFX(RPC_URL!);
+    await bfx.loadPoolState(EURC, XSGD);
+  }, 60_000);
+
+  afterAll(() => bfx.stop());
+
+  it("quote EURC → XSGD returns two hops", () => {
+    const result = bfx.quote(EURC, XSGD, 1_000_000n);
+    expect(result.amountOut).toBeGreaterThan(0n);
+    expect(result.hops).toHaveLength(2);
+    expect(result.hops[0].tokenIn.toLowerCase()).toBe(EURC.toLowerCase());
+    expect(result.hops[0].tokenOut.toLowerCase()).toBe(USDC.toLowerCase());
+    expect(result.hops[1].tokenIn.toLowerCase()).toBe(USDC.toLowerCase());
+    expect(result.hops[1].tokenOut.toLowerCase()).toBe(XSGD.toLowerCase());
+    expect(result.hops[1].amountIn).toBe(result.hops[0].amountOut);
+  });
+
+  it("quote XSGD → EURC returns two hops", () => {
+    const result = bfx.quote(XSGD, EURC, 1_000_000n);
+    expect(result.amountOut).toBeGreaterThan(0n);
+    expect(result.hops).toHaveLength(2);
+    expect(result.hops[0].tokenIn.toLowerCase()).toBe(XSGD.toLowerCase());
+    expect(result.hops[0].tokenOut.toLowerCase()).toBe(USDC.toLowerCase());
+    expect(result.hops[1].tokenIn.toLowerCase()).toBe(USDC.toLowerCase());
+    expect(result.hops[1].tokenOut.toLowerCase()).toBe(EURC.toLowerCase());
+  });
+
+  it("buildSwap routes to Router for multi-hop", () => {
+    const result = bfx.quote(EURC, XSGD, 1_000_000n);
+    const tx = bfx.buildSwap({
+      tokenIn: EURC,
+      tokenOut: XSGD,
+      amountIn: 1_000_000n,
+      minAmountOut: result.amountOut * 99n / 100n,
+      recipient: "0x0000000000000000000000000000000000000001",
+      deadline: Math.floor(Date.now() / 1000) + 300,
+    });
+    expect(tx.to.toLowerCase()).not.toBe(EURC_USDC_POOL.toLowerCase());
+    expect(tx.to.toLowerCase()).not.toBe(XSGD_USDC_POOL.toLowerCase());
+    expect(tx.data.startsWith("0x")).toBe(true);
+    expect(tx.value).toBe(0n);
+  });
 });
 
